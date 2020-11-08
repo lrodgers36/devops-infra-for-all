@@ -12,7 +12,7 @@ Here is a list of previous and upcoming meetups, along with the details for unde
 
 | Title | Short Description | Tags |
 | ----- | ----------------- | ---- |
-| Stop Snoozing Those Alarmsgit status | ChatOps is about driving development through conversations between your team in a more visible and real-time environment. Since the world has recently plunged into working more remotely, organisations are looking to communication platforms for ensuring employees can collaborate and work together more easily. This talk is going to be focussed on how you can monitor your AWS infrastructure using Chatbot and Slack. | #ChatOps #AWSChatbot #Slack |
+| Stop Snoozing Those Alarms | ChatOps is about driving development through conversations between your team in a more visible and real-time environment. Since the world has recently plunged into working more remotely, organisations are looking to communication platforms for ensuring employees can collaborate and work together more easily. This talk is going to be focussed on how you can monitor your AWS infrastructure using Chatbot and Slack. | #ChatOps #AWSChatbot #Slack |
 
 ## Services
 The following list describes the services available:

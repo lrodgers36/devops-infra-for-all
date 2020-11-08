@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Infrastructure to Configure a VPN
+Parameters:
+  Name:
+    Description: Name for VPN - Also used for Route53 Record and tagging
+    Type: String
+  SubnetId:
+    Description: Choose a public facing subnet
+    Type: AWS::EC2::Subnet::Id
+  KeyName:
+    Description: SSH key name for VPN access
+    Type: AWS::EC2::KeyPair::KeyName
+  Environment:
+    Description: Registered domain
+    Default: "your-domain-name.here"
+    Type: String
+  CreateRoute53:
+    Description: Do you want to create a Route53 record for this vpn
+    Default: true
+    AllowedValues:
+      - true
+      - false
+    Type: String
+  DefaultSecurityGroup:
+    Description: Do you want to add the default VPC security group to the VPN
+    Default: true
+    AllowedValues:
+      - true
+      - false
+    Type: String
+  InstanceType:
+    Type: String
+    Description: The type of EC2 Instance to use
+    Default: t3.micro
+    AllowedValues:
+    # Add additional instance types for your personal use cases
+      - m3.medium
+      - t3.micro
+      - t3.medium
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC ID for resources to be deployed in
+  AMIId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Latest AMI ID for EC2 Instance
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  DefaultSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: VPC Default Securty Group
+  CIDRIP:
+    Description: Your IP Range to Whitelist in the VPN security group
+    Type: String
+  TerminationProtection:
+    Type: String
+    Description: Set to true to enable termination protection on the EC2 instance
+    Default: true
+    AllowedValues:
+      - true
+      - false
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Environment
+        Parameters:
+          - Name
+          - Environment
+          - AMIId
+          - InstanceType
+          - KeyName
+          - TerminationProtection
+      - Label:
+          default: Networking
+        Parameters:
+          - CIDRIP
+          - VPCId
+          - SubnetId
+          - DefaultSecurityGroup
+          - CreateRoute53
+  ParameterLabels:
+    SubnetId:
+      default: Subnet ID
+    KeyName:
+      default: Key Name
+    CreateRoute53:
+      default: Create Route53 Record?
+    DefaultSecurityGroup:
+      default: Use Default Security Group?
+    CIDRIP:
+      default: IP Address
+    TerminationProtection:
+      default: Termination Protection
+
+Conditions:
+  CreateRoute53: !Equals [!Ref CreateRoute53, "true"]
+  DefaultSecurityGroup: !Equals [!Ref DefaultSecurityGroup, "true"]
+
+Resources:
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMFullAccess
+
+  InstanceProfile:
+    DependsOn:
+      - InstanceRole
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+      InstanceProfileName: VPNServerInstanceProfile
+
+  VPNInstance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - EIP
+      - VPNInstanceSecurityGroup
+      - InstanceProfile
+    Properties:
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SourceDestCheck: false
+      KeyName: !Ref KeyName
+      ImageId: !Ref AMIId
+      DisableApiTermination: !Ref TerminationProtection
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          GroupSet:
+            - !GetAtt VPNInstanceSecurityGroup.GroupId
+            -
+              Fn::If:
+                - DefaultSecurityGroup
+                - Ref: DefaultSecurityGroup
+                - Ref: AWS::NoValue
+          SubnetId:
+            Ref: SubnetId
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -ex
+          yum update -y
+          yum install -y docker
+          sudo service docker start
+          if ! [ ${CreateRoute53} == "true" ]; then
+            DNS_NAME=`curl ifconfig.me`
+          else
+            DNS_NAME=${Name}.${Environment}
+          fi
+          docker volume create --name ovpn-data-personal
+          docker run -v ovpn-data-personal:/etc/openvpn --rm kylemanna/openvpn:2.3 ovpn_genconfig -u udp://$DNS_NAME -2 -C AES-256-CBC
+          docker run -v ovpn-data-personal:/etc/openvpn --rm -i -e "EASYRSA_BATCH=1" -e "EASYRSA_REQ_CN=Personal CA" kylemanna/openvpn:2.3 ovpn_initpki nopass
+          docker run -v ovpn-data-personal:/etc/openvpn --restart=always --name vpn -d -p 1194:1194/udp --cap-add=NET_ADMIN kylemanna/openvpn:2.3
+      Tags:
+        - Key: Name
+          Value:
+            Ref: Name
+
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Tags:
+        - Key: Name
+          Value:
+            Ref: Name
+
+  EIPAssoc:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId:
+        Ref: VPNInstance
+      AllocationId:
+        Fn::GetAtt:
+          - EIP
+          - AllocationId
+
+  VPNInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable Access to the VPN
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref CIDRIP
+        - IpProtocol: udp
+          FromPort: 1194
+          ToPort: 1194
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value:
+            Ref: Name
+
+  VPNInstanceSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: "-1"
+      FromPort: "-1"
+      GroupId:
+        Ref: VPNInstanceSecurityGroup
+      SourceSecurityGroupId:
+        Ref: VPNInstanceSecurityGroup
+
+  VPNRoute53:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateRoute53
+    DependsOn: EIP
+    Properties:
+      HostedZoneName:
+        Fn::Join:
+          - ""
+          - - Ref: Environment
+            - "."
+      Name:
+        Fn::Join:
+          - "."
+          - - Ref: Name
+            - Ref: Environment
+      ResourceRecords:
+        - Ref: EIP
+      Type: A
+      TTL: "60"
+
