@@ -18,6 +18,7 @@ Here is a list of previous and upcoming meetups, along with the details for unde
 The following list describes the services available:
 
 - Creating a VPN
+- AWS Chatbot & Slack Integration
 
 ## Contribution
 
