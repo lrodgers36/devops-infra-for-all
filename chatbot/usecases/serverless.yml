@@ -1,0 +1,103 @@
+service: slack-chatbot-invoke-lambda
+
+provider:
+  name: aws 
+  region: ${opt:region}
+  runtime: python3.8
+  timeout: 120
+  vpc:
+    securityGroupIds:
+      - ${env:VPCSECURITYGROUP}
+    subnetsIds:
+      - ${env:VPCSUBNETID}
+  environment:
+    REGION: ${opt:region}
+  
+package:
+  exclude:
+    - '*.yml'
+    - '*.env'
+    - 'node_modules/'
+
+
+functions:
+  restartWebsite:
+    description: Restarts Website Server
+    handler: handlers/restartWebsite.main
+    role: websiteRestartRole
+    environment:
+      SSM_RESTART: !Ref restartWebsiteSsm
+
+resources:
+  Resources:
+    restartWebsiteSsm:
+      Type: AWS::SSM::Document 
+      Properties:
+        Name: DemoWebsiteRestartCommand
+        DocumentType: Command 
+        Content:
+          schemaVersion: '2.2'
+          description: Run Docker Command on Server
+          parameters:
+            websitePort:
+              type: String 
+              description: (Required) Port to expose for Web Application
+              default: '8000'
+          mainSteps:
+            - action: aws:runShellScript 
+              name: runCommand 
+              inputs:
+                runCommand:
+                  - "sudo service docker start"
+                  - "image=$(docker ps -n 1 --format '{{.Image}}')"
+                  - "echo $image"
+                  - "docker run -p {{ websitePort }}:{{ websitePort }} $(echo $image)"
+    websiteRestartRole:
+      Type: AWS::IAM::Role 
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com 
+              Action:
+                - sts:AssumeRole 
+        Path: '/'
+        Policies:
+          - PolicyName: ec2-policy 
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow 
+                  Action:
+                    - ec2:Describe*
+                    - ec2:StartInstances
+                    - ec2:StopInstances
+                    - ec2:RebootInstances
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterface
+                    - ec2:DeleteNetworkInterface
+                  Resource: "*"
+          - PolicyName: ssm-policy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow 
+                  Action:
+                    - ssm:SendCommand
+                  Resource: '*'
+          - PolicyName: cloudwatch-logs-policy 
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow 
+                  Action:
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource: '*'
+        RoleName: website-restart-role
+
+plugins:
+  -  serverless-dotenv-plugin

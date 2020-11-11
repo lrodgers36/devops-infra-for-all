@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Chatbot Configuration for Slack Notifications
+
+Parameters:
+  SlackChannelName:
+    Description: Name of the Slack channel you wish to integrate
+    Type: String
+  SlackChannelID:
+    Description: ID of the Slack channel you wish to integrate
+    Type: String
+  SlackWorkspaceID:
+    Description: ID of the Slack workspace already configured - see AWS Chatbot in the Console
+    Type: String
+  SNSTopicARNs:
+    Description: List of SNS Topic ARNs to associate with this particular Slack channel (comma separated list)
+    Type: CommaDelimitedList
+
+Metadata: 
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Slack Configuration
+        Parameters:
+          - SlackWorkspaceID
+          - SlackChannelName
+          - SlackChannelID
+      - Label:
+          default: SNS Topic
+        Parameters: [SNSTopicARNs]
+    ParameterLabels:
+      SlackChannelName:
+        default: Slack Channel Name
+      SlackChannelID:
+        default: Slack Channel ID
+      SlackWorkspaceID:
+        default: Slack Workspace ID
+      SNSTopicARNs:
+        default: SNS Topics
+
+Resources: 
+  SlackNotificationChatbotIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub slack-${SlackChannelName}-notification-chatbot-role
+      Description: Allow chatbot to send notifications to slack channel
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - chatbot.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyDocument: 
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - cloudwatch:Describe*
+                  - cloudwatch:Get*
+                  - cloudwatch:List*
+                Resource: '*'
+          PolicyName: !Sub slack-${SlackChannelName}-read-policy
+        - PolicyDocument: 
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - lambda:invokeAsync
+                  - lambda:invokeFunction
+                  - lambda:ListFunctions
+                Resource: '*'
+          PolicyName: !Sub slack-${SlackChannelName}-lambda-policy
+  SlackNotificationChatbotConfiguration:
+    Type: AWS::Chatbot::SlackChannelConfiguration
+    DependsOn: 
+      - SlackNotificationChatbotIAMRole
+    Properties: 
+      ConfigurationName: !Sub slack-${SlackChannelName}
+      IamRoleArn: !GetAtt SlackNotificationChatbotIAMRole.Arn
+      LoggingLevel: INFO
+      SlackChannelId: 
+        Ref: SlackChannelID
+      SlackWorkspaceId: 
+        Ref: SlackWorkspaceID
+      SnsTopicArns: !Ref SNSTopicARNs
